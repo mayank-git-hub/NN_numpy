@@ -1,9 +1,10 @@
-import numpy as np
+import torch
 import csv
-import random
+from tqdm import tqdm
+import numpy as np
 
 
-class NeuralNetwork():
+class NeuralNetwork:
     def __init__(self, neurons, hidden_acti,
                  output_acti):
         # arguments: an array "neurons" consist of number of neurons for each layer,
@@ -12,23 +13,30 @@ class NeuralNetwork():
         self.outputSize = neurons[-1]  # Number of neurons in output layer
         self.layers = len(neurons)
         self.w = []
+
         for i in range(len(neurons) - 1):
-            self.w.append(
-                np.random.normal(0, 0.1, size=neurons[i] * neurons[i + 1]).reshape([neurons[i], neurons[i + 1]]))
+
+            cur_weight = torch.from_numpy(
+                    np.random.normal(0, 0.1, size=neurons[i] * neurons[i + 1]).reshape([neurons[i], neurons[i + 1]]))
+
+            if torch.cuda.is_available():
+                cur_weight = cur_weight.cuda()
+
+            self.w.append(cur_weight)
   
         self.activationHidden = None  # Activation funtion to be used in hidden layers
         self.activationOutput = None  # Activation funtion to be used in output layer
         self.activationHiddenPrime = None  # Derivative of the activation funtion to be used in hidden layers
         self.activationOutputPrime = None  # Derivative of the activation funtion to be used in output layer
 
-        if (hidden_acti == "sigmoid"):
+        if hidden_acti == "sigmoid":
             self.activationHidden = self.sigmoid
             self.activationHiddenPrime = self.sigmoidPrime
         else:
             self.activationHidden = self.linear
             self.activationHiddenPrime = self.linearPrime
 
-        if (output_acti == "sigmoid"):
+        if output_acti == "sigmoid":
             self.activationOutput = self.sigmoid
             self.activationOutputPrime = self.sigmoidPrime
         else:
@@ -36,25 +44,33 @@ class NeuralNetwork():
             self.activationOutputPrime = self.linearPrime
 
     def sigmoid(self, s):  # sigmoid activation function
-        return (1 / (1 + np.exp(-s)))
+        return 1 / (1 + torch.exp(-s))
 
     def sigmoidPrime(self, x):  # derivative sigmoid activation function
-        return (self.sigmoid(x) * (1 - self.sigmoid(x)))
+        return self.sigmoid(x) * (1 - self.sigmoid(x))
 
     def linear(self, s):  # Linear activation function
-        return (s)
+        return s
 
     def linearPrime(self, x):  # derivative of linear activation function
-        return (np.ones(len(x)))
+        return torch.ones(len(x))
 
     def forward(self, x):  # function of forward pass which will receive input and give the output of final layer
-        Z1 = np.dot(self.w[0].T, x)
+
+        Z1 = torch.matmul(self.w[0].transpose(1, 0), x)
+        # print(Z1.shape, 'Z1')
         A1 = self.sigmoid(Z1)
-        Z2 = np.dot(self.w[1].T, A1)
+        # print(A1.shape, 'A1')
+        Z2 = torch.matmul(self.w[1].transpose(1, 0), A1)
+        # print(Z2.shape, 'Z2')
         A2 = self.sigmoid(Z2)
-        Z3 = np.dot(self.w[2].T, A2)
+        # print(A2.shape, 'A2')
+        Z3 = torch.matmul(self.w[2].transpose(1, 0), A2)
+        # print(Z3.shape, 'Z3')
         A3 = self.sigmoid(Z3)
-        Z4 = np.dot(self.w[3].T, A3)
+        # print(A3.shape, 'A3')
+        Z4 = torch.matmul(self.w[3].transpose(1, 0), A3)
+        # print(Z4.shape, 'Z4')
         A4 = self.sigmoid(Z4)
         self.temp = {
             "Z1": Z1,
@@ -68,7 +84,8 @@ class NeuralNetwork():
         }
         return A4
 
-    def backward(self, x, y, o):  # find the loss and return derivative of loss w.r.t every parameter
+    def backward(self, y, o):  # find the loss and return derivative of loss w.r.transpose(1, 0) every parameter
+
         L = sum((o - y) ** 2)
         Z1 = self.temp["Z1"]
         A1 = self.temp["A1"]
@@ -79,13 +96,13 @@ class NeuralNetwork():
         Z4 = self.temp["Z4"]
         A4 = self.temp["A4"]
         g4 = (2 * (o - y))
-        g3 = np.matmul(np.diag(self.sigmoidPrime(Z3)), np.matmul(self.w[3], g4))
-        g2 = np.matmul(np.diag(self.sigmoidPrime(Z2)), np.matmul(self.w[2], g3))
-        g1 = np.matmul(np.diag(self.sigmoidPrime(Z1)), np.matmul(self.w[1], g2))
-        dw3 = np.matmul(np.diag(self.sigmoidPrime(Z4)), np.multiply(g4, A4))
-        dw2 = np.matmul(np.diag(self.sigmoidPrime(Z3)), np.multiply(g3, A3))
-        dw1 = np.matmul(np.diag(self.sigmoidPrime(Z2)), np.multiply(g2, A2))
-        dw0 = np.matmul(np.diag(self.sigmoidPrime(Z1)), np.multiply(g1, A1))
+        g3 = torch.mul(self.sigmoidPrime(Z3), torch.matmul(self.w[3], g4))
+        g2 = torch.mul(self.sigmoidPrime(Z2), torch.matmul(self.w[2], g3))
+        g1 = torch.mul(self.sigmoidPrime(Z1), torch.matmul(self.w[1], g2))
+        dw3 = torch.mul(self.sigmoidPrime(Z4), torch.mul(g4, A4))
+        dw2 = torch.mul(self.sigmoidPrime(Z3), torch.mul(g3, A3))
+        dw1 = torch.mul(self.sigmoidPrime(Z2), torch.mul(g2, A2))
+        dw0 = torch.mul(self.sigmoidPrime(Z1), torch.mul(g1, A1))
 
         grads = {
             "dw3": dw3,
@@ -107,32 +124,32 @@ class NeuralNetwork():
         self.w[3] -= learning_rate * dw3
 
     def train(self, X, Y):  # receive the full training data set
-        lr = 1e-4  # learning rate
-        epochs = 100  # number of epochs
+
+        lr = 1e-3  # learning rate
+
+        epochs = 100
+        # number of epochs
         batchsize = 50
         batches = round(len(X)/batchsize)
-        k = 0
         for e in range(epochs):
-            sum1 = 0
             sumo = 0
-            sumg = {
-                "dw3": 0,
-                "dw2": 0,
-                "dw1": 0,
-                "dw0": 0
-            }
-            for q in range(batches):
-                sum1 = 0
-                for a in range(batchsize):
-                    out = self.forward(X[random.sample(range(0,24000),1)[0]])  # call of forward pass to get the predicted value
-                    los, grads = self.backward(X[q], Y[q], out)  # find the gradients using backward pass
-                    sumg["dw3"] += grads["dw3"]
-                    sumg["dw2"] += grads["dw2"]
-                    sumg["dw1"] += grads["dw1"]
-                    sumg["dw0"] += grads["dw0"]
-                    sum1 += los
-                self.update_parameters(sumg, lr)
-                sumo += sum1
+            batch_iterator = tqdm(range(batches))
+
+            for q in batch_iterator:
+
+                item = np.random.randint(24000, size=batchsize)
+                out = self.forward(X[item].transpose(1, 0))
+                los, grads = self.backward(Y[item].transpose(1, 0), out)
+
+                los = torch.mean(los)
+                for grad_i in grads:
+                    grads[grad_i] = torch.mean(grads[grad_i], dim=1)
+
+                self.update_parameters(grads, lr)
+
+                sumo += los.item()
+
+                batch_iterator.set_description('Average Loss: ' + str(sumo/(q + 1)))
 
             print('\nAverage Loss: ', sumo/len(X))
 
@@ -141,35 +158,34 @@ class NeuralNetwork():
         print("Output: \n" + str((self.forward(x))))
 
 
-Y = []
-X = []
+if __name__ == "__main__":
 
-with open('Assignment3_train_data.csv') as f:
-    f_csv = csv.reader(f)
-    headers = next(f_csv)
-    for row in f_csv:
+    np.random.seed(0)
+    Y = np.zeros([24000, 4])
+    X = np.zeros([24000, 784])
 
-        if (row[0] == '1'):
-            Y.append(np.array([1, 0, 0, 0]))
-        if (row[0] == '2'):
-            Y.append(np.array([0, 1, 0, 0]))
-        if (row[0] == '3'):
-            Y.append(np.array([0, 0, 1, 0]))
-        if (row[0] == '4'):
-            Y.append(np.array([0, 0, 0, 1]))
+    with open('Assignment3_train_data.csv') as f:
+        f_csv = csv.reader(f)
+        headers = next(f_csv)
+        for no, row in enumerate(f_csv):
 
-        X.append(row[1:])
+            Y[no, int(row[0]) - 1] = 1
+            X[no, :] = np.array(row[1:]).astype(np.float32)/255
 
-for i in range(len(X)):
-    for j in range(len(X[0])):
-        X[i][j] = float(X[i][j]) / 255
-    X[i] = np.array(X[i])
+    D_in, H1, H2, H3, D_out = len(X[0]), 300, 500, 300, 4
 
-D_in, H1, H2, H3, D_out = len(X[0]), 300, 500, 300, 4
+    neurons = [D_in, H1, H2, H3, D_out]  # list of number of neurons in the layers sequentially.
 
-neurons = [D_in, H1, H2, H3, D_out]  # list of number of neurons in the layers sequentially.
+    Hidden_activation = "sigmoid"  # activation function of the hidden layers.
+    Output_activation = "sigmoid"  # activation function of the output layer.
+    test = NeuralNetwork(neurons, Hidden_activation, Output_activation)
 
-Hidden_activation = "sigmoid"  # activation function of the hidden layers.
-Output_activation = "sigmoid"  # activation function of the output layer.
-test = NeuralNetwork(neurons, Hidden_activation, Output_activation)
-test.train(X, Y)
+    X = torch.from_numpy(X)
+    Y = torch.from_numpy(Y)
+
+    if torch.cuda.is_available():
+
+        X = X.cuda()
+        Y = Y.cuda()
+
+    test.train(X, Y)
